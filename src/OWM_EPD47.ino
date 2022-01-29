@@ -1,34 +1,21 @@
-// ESP32 Weather Display and a LilyGo EPD 4.7" Display, obtains Open Weather Map data, decodes and then displays it.
-// This software, the ideas and concepts is Copyright (c) David Bird 2021. All rights to this software are reserved.
-// #################################################################################################################
-
 #include <Arduino.h>            // In-built
 #include <esp_task_wdt.h>       // In-built
 #include "freertos/FreeRTOS.h"  // In-built
 #include "freertos/task.h"      // In-built
 #include "epd_driver.h"         // https://github.com/Xinyuan-LilyGO/LilyGo-EPD47
 #include "esp_adc_cal.h"        // In-built
-
 #include <ArduinoJson.h>        // https://github.com/bblanchon/ArduinoJson
 #include <HTTPClient.h>         // In-built
-
-#include <PubSubClient.h>
-
 #include <WiFi.h>               // In-built
 #include <SPI.h>                // In-built
 #include <time.h>               // In-built
-
-#include "owm_credentials.h"
+#include "user_settings.h"
 #include "forecast_record.h"
-//#include "lang.h"
-#include "lang_fr.h"
 
 #define SCREEN_WIDTH   EPD_WIDTH
 #define SCREEN_HEIGHT  EPD_HEIGHT
 
-//################  VERSION  ##################################################
-String version = "2.7 / 4.7in";  // Programme version, see change log at end
-//################ VARIABLES ##################################################
+//String version = "2.7.1 / 4.7in"; 
 
 enum alignment {LEFT, RIGHT, CENTER};
 #define White         0xFF
@@ -62,25 +49,22 @@ float rain_readings[max_readings]        = {0};
 float snow_readings[max_readings]        = {0};
 
 long SleepDuration   = 20; // Sleep time in minutes, aligned to the nearest minute boundary, so if 30 will always update at 00 or 30 past the hour
-int  WakeupHour      = 7;  // Wakeup after 07:00 to save battery power
+int  WakeupHour      = 6;  // Wakeup after 06:00 to save battery power
 int  SleepHour       = 23; // Sleep  after 23:00 to save battery power
 long StartTime       = 0;
 long SleepTimer      = 0;
 long Delta           = 30; // ESP32 rtc speed compensation, prevents display at xx:59:yy and then xx:00:yy (one minute later) to save power
 
 //fonts
-#include "opensans8b.h"
-#include "opensans10b.h"
-#include "opensans12b.h"
-#include "opensans18b.h"
-#include "opensans24b.h"
+#include "OpenSans8B.h"
+#include "OpenSans10B.h"
+#include "OpenSans12B.h"
+#include "OpenSans18B.h"
+#include "OpenSans24B.h"
 #include "moon.h"
 #include "sunrise.h"
 #include "sunset.h"
 #include "uvi.h"
-#include "domoticz.h"
-#include "washing.h"
-#include "disher.h"
 
 GFXfont  currentFont;
 uint8_t *framebuffer;
@@ -148,13 +132,7 @@ void loop() {
 }
 
 void setup() {
-  int cursor_x = 200;
-  int cursor_y = 500;
   InitialiseSystem();
-  //epd_poweron();      // Switch on EPD display
-   //writeln((GFXfont *)&OpenSans10B, "test" , &cursor_x, &cursor_y, NULL);
-  //epd_clear();  
-  // epd_poweroff();
   if (StartWiFi() == WL_CONNECTED && SetupTime() == true) {
     bool WakeUp = false;
     if (WakeupHour > SleepHour)
@@ -162,28 +140,24 @@ void setup() {
     else
       WakeUp = (CurrentHour >= WakeupHour && CurrentHour <= SleepHour);
     if (WakeUp) {
-      
       byte Attempts = 1;
       bool RxWeather  = false;
       bool RxForecast = false;
       WiFiClient client;   // wifi client object
-      get_data_domoticz();
-      //get_data_domoticz_new();
       while ((RxWeather == false || RxForecast == false) && Attempts <= 2) { // Try up-to 2 time for Weather and Forecast data
         if (RxWeather  == false) RxWeather  = obtainWeatherData(client, "onecall");
         if (RxForecast == false) RxForecast = obtainWeatherData(client, "forecast");
         Attempts++;
       }
       Serial.println("Received all weather data...");
-      // if --> made somes issues 
-      //if (RxWeather && RxForecast)      { // Only if received both Weather or Forecast proceed
+      if (RxWeather && RxForecast) { // Only if received both Weather or Forecast proceed
         StopWiFi();         // Reduces power consumption
         epd_poweron();      // Switch on EPD display
         epd_clear();        // Clear the screen
         DisplayWeather();   // Display the weather data
         edp_update();       // Update the display to show the information
         epd_poweroff_all(); // Switch off all power to EPD
-       //}
+      }
     }
   }
   BeginSleep();
@@ -346,9 +320,8 @@ void DisplayWeather() {                          // 4.7" e-paper display is 960x
   DisplayAstronomySection(5, 252);               // Astronomy section Sun rise/set, Moon phase and Moon icon
   DisplayMainWeatherSection(320, 110);           // Centre section of display for Location, temperature, Weather report, current Wx Symbol
   DisplayWeatherIcon(835, 140);                  // Display weather icon scale = Large;
-  DisplayForecastSection ( 30 , 370);              // 3hr forecast boxes
+  DisplayForecastSection(285, 220);              // 3hr forecast boxes
   DisplayGraphSection(320, 220);                 // Graphs of pressure, temperature, humidity and rain or snowfall
-  DisplayMQTT (260 , 245 );
 }
 
 void DisplayGeneralInfoSection() {
@@ -422,20 +395,20 @@ String WindDegToOrdinalDirection(float winddirection) {
   if (winddirection >= 281.25 && winddirection < 303.75) return TXT_WNW;
   if (winddirection >= 303.75 && winddirection < 326.25) return TXT_NW;
   if (winddirection >= 326.25 && winddirection < 348.75) return TXT_NNW;
-  return "No Data";
+  return "?";
 }
 
 void DisplayTempHumiPressSection(int x, int y) {
-  setFont(OpenSans18B);
+  setFont(OpenSans24B);
   drawString(x - 30, y, String(WxConditions[0].Temperature, 1) + "°   " + String(WxConditions[0].Humidity, 0) + "%", LEFT);
   setFont(OpenSans12B);
-  DrawPressureAndTrend(x + 195, y + 15, WxConditions[0].Pressure, WxConditions[0].Trend);
+  DrawPressureAndTrend(x + 215, y + 15, WxConditions[0].Pressure, WxConditions[0].Trend);
   int Yoffset = 42;
   if (WxConditions[0].Windspeed > 0) {
-    drawString(x - 30, y + Yoffset, String(WxConditions[0].FeelsLike, 1) + "° FL", LEFT);   // Show FeelsLike temperature if windspeed > 0
+    drawString(x - 30, y + Yoffset, String(WxConditions[0].FeelsLike, 1) + "° "+TXT_FEELSLIKE, LEFT);   // Show FeelsLike temperature if windspeed > 0
     Yoffset += 30;
   }
-  drawString(x - 30, y + Yoffset, String(WxConditions[0].High, 0) + "° | " + String(WxConditions[0].Low, 0) + "° Hi/Lo", LEFT); // Show forecast high and Low
+  drawString(x - 30, y + Yoffset, String(WxConditions[0].High, 0) + "° | " + String(WxConditions[0].Low, 0) + "° " + TXT_HILO, LEFT); // Show forecast high and Low
 }
 
 void DisplayForecastTextSection(int x, int y) {
@@ -463,24 +436,21 @@ void DisplayForecastTextSection(int x, int y) {
 void DisplayVisiCCoverUVISection(int x, int y) {
   setFont(OpenSans12B);
   Serial.print("=========================="); Serial.println(WxConditions[0].Visibility);
-  // Visibility(x + 5, y, String(WxConditions[0].Visibility) + "M");
-  //CloudCover(x + 155, y, WxConditions[0].Cloudcover);
-  CloudCover(x + 5, y, WxConditions[0].Cloudcover);
-  // Display_UVIndexLevel(x + 265, y, WxConditions[0].UVI);
-  Display_UVIndexLevel(x + 115, y, WxConditions[0].UVI);
+  Visibility(x + 5, y, String(WxConditions[0].Visibility) + "M");
+  CloudCover(x + 155, y, WxConditions[0].Cloudcover);
+  Display_UVIndexLevel(x + 265, y, WxConditions[0].UVI);
 }
 
 void Display_UVIndexLevel(int x, int y, float UVI) {
   String Level = "";
-  if (UVI <= 2)              Level = " (L)";
-  if (UVI >= 3 && UVI <= 5)  Level = " (M)";
-  if (UVI >= 6 && UVI <= 7)  Level = " (H)";
-  if (UVI >= 8 && UVI <= 10) Level = " (VH)";
-  if (UVI >= 11)             Level = " (EX)";
+  if (UVI <= 2)              Level = " "+ TXT_UV_LOW;
+  if (UVI >= 3 && UVI <= 5)  Level = " "+ TXT_UV_MEDIUM;
+  if (UVI >= 6 && UVI <= 7)  Level = " " + TXT_UV_HIGH;
+  if (UVI >= 8 && UVI <= 10) Level = " "+ TXT_UV_VERYHIGH;
+  if (UVI >= 11)             Level = " " + TXT_UV_EXTREME;
   drawString(x + 20, y - 5, String(UVI, (UVI < 0 ? 1 : 0)) + Level, LEFT);
   DrawUVI(x - 10, y - 5);
 }
-
 
 void DisplayForecastWeather(int x, int y, int index, int fwidth) {
   x = x + fwidth * index;
@@ -597,9 +567,9 @@ void DisplayGraphSection(int x, int y) {
   int gy = (SCREEN_HEIGHT - gheight - 30);
   int gap = gwidth + gx;
   // (x,y,width,height,MinValue, MaxValue, Title, Data Array, AutoScale, ChartMode)
- // DrawGraph(gx + 0 * gap, gy, gwidth, gheight, 900, 1050, Units == "M" ? TXT_PRESSURE_HPA : TXT_PRESSURE_IN, pressure_readings, max_readings, autoscale_on, barchart_off);
-  //DrawGraph(gx + 1 * gap, gy, gwidth, gheight, 10, 30,    Units == "M" ? TXT_TEMPERATURE_C : TXT_TEMPERATURE_F, temperature_readings, max_readings, autoscale_on, barchart_off);
-  //DrawGraph(gx + 2 * gap, gy, gwidth, gheight, 0, 100,   TXT_HUMIDITY_PERCENT, humidity_readings, max_readings, autoscale_off, barchart_off);
+  DrawGraph(gx + 0 * gap, gy, gwidth, gheight, 900, 1050, Units == "M" ? TXT_PRESSURE_HPA : TXT_PRESSURE_IN, pressure_readings, max_readings, autoscale_on, barchart_off);
+  DrawGraph(gx + 1 * gap, gy, gwidth, gheight, 10, 30,    Units == "M" ? TXT_TEMPERATURE_C : TXT_TEMPERATURE_F, temperature_readings, max_readings, autoscale_on, barchart_off);
+  DrawGraph(gx + 2 * gap, gy, gwidth, gheight, 0, 100,   TXT_HUMIDITY_PERCENT, humidity_readings, max_readings, autoscale_off, barchart_off);
   if (SumOfPrecip(rain_readings, max_readings) >= SumOfPrecip(snow_readings, max_readings))
     DrawGraph(gx + 3 * gap + 5, gy, gwidth, gheight, 0, 30, Units == "M" ? TXT_RAINFALL_MM : TXT_RAINFALL_IN, rain_readings, max_readings, autoscale_on, barchart_on);
   else
@@ -921,7 +891,7 @@ void addmoon(int x, int y, bool IconSize) {
 
 void Nodata(int x, int y, bool IconSize, String IconName) {
   if (IconSize == LargeIcon) setFont(OpenSans24B); else setFont(OpenSans12B);
-  drawString(x - 3, y - 10, "No Data", CENTER);
+  drawString(x - 3, y - 10, "?", CENTER);
 }
 
 void DrawMoonImage(int x, int y) {
@@ -951,33 +921,6 @@ void DrawUVI(int x, int y) {
   };
   epd_draw_grayscale_image(area, (uint8_t *) uvi_data);
 }
-/*
-void DrawDimmerImage(int x, int y) {
-  drawString(x + 30, y, String(CloudCover) + "%", LEFT);
-}
-
-void DrawDisherImage(int x, int y) {
-  Rect_t area = {
-    .x = x, .y = y, .width  = disher_width, .height =  disher_height
-  };
-  epd_draw_grayscale_image(area, (uint8_t *) disher_data);
-}
-
-void DrawLinkyImage(int x, int y) {
-  Rect_t area = {
-    .x = x, .y = y, .width  = linky_width, .height =  linky_height
-  };
-  epd_draw_grayscale_image(area, (uint8_t *) linky_data);
-}
-
-void DrawSolarImage(int x, int y) {
-  Rect_t area = {
-    .x = x, .y = y, .width  = solar_width, .height =  solar_height
-  };
-  epd_draw_grayscale_image(area, (uint8_t *) solar_data);
-}
-*/
-
 
 /* (C) D L BIRD
     This function will draw a graph on a ePaper/TFT/LCD display using data from an array containing data to be graphed.
@@ -1110,44 +1053,3 @@ void setFont(GFXfont const & font) {
 void edp_update() {
   epd_draw_grayscale_image(epd_full_screen(), framebuffer); // Update the screen
 }
-
-/////////////////// code domotique  //////////////////////////////////////////////////////////////
-/// reste du code de traitement dans domoticz.h 
-void DisplayMQTT(int x, int y) {
-drawRect ( x-10, y-10 , 700,145, 0x65 )   ;
-setFont(OpenSans12B);
-
-for (int j = 0; j <= 3 ; j++) {
-    int cy = 0 ;
-for (int i = j*3; i <= (j*3 + 2) ; i++) { 
-    if  ( domoticz_IDX[i][0] != NULL ) {  // prevent hang null value
-      int ycorrect=0;
-    if ( domoticz_IDX[i][0].indexOf("y") != -1  ||domoticz_IDX[i][0].indexOf("p") != -1 ) ycorrect = -6 ;   /// correction du big polices  ( 12b) 
-    drawString(x +10+ cy*225 , y+(j*35)+ycorrect , domoticz_IDX[i][0] +" : " + domoticz_result[i],  LEFT);
-    cy++; 
-    }
-}}
-/// condition d'affichage des images 
-if ( domoticz_result[0].substring(0,2).toInt() > wash ) { DrawWashingImage ( x+500 , y+ 35 );  }// si temp eau > 45 > ok pour machine laver
-if ( domoticz_result[4].substring(0,4).toInt() > disher ) DrawDisherImage ( x+575  , y+ 35 ); // si prod > 700w alors ok pour lave vaisselle
-  }
-
-void DrawWashingImage(int x, int y) {
-  Rect_t area = {
-    .x = x, .y = y, .width  = washing_width, .height =  washing_height
-  };
-  epd_draw_grayscale_image(area, (uint8_t *) washing_data);
-}
-
-void DrawDisherImage(int x, int y) {
-  Rect_t area = {
-    .x = x, .y = y, .width  = disher_width, .height =  disher_height
-  };
-  epd_draw_grayscale_image(area, (uint8_t *) disher_data);
-}
-
-//////////////////////////// fin code domotique  //////////////////////////////////////////////////////////////
-
-/*
-   1071 lines of code 03-03-2021
-*/
