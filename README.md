@@ -13,7 +13,7 @@ To compile you will need following libraries
 - https://github.com/bblanchon/ArduinoJson  
 
 In board manager choose ESP32 Dev Module with PSRAM Enabled.  
-The project is configured as PlatformIO oroject (Visual Studio Code AddIn) - to compile with arduino IDE rename src folder to OWM_EPD47.
+The project is configured as PlatformIO Project (Visual Studio Code AddIn) - to compile with arduino IDE rename src folder to OWM_EPD47.
 
 ## LilyGO T5 Display FAQ
 
