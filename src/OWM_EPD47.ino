@@ -106,7 +106,10 @@ uint8_t StartWiFi() {
     wifi_signal = WiFi.RSSI(); // Get Wifi Signal strength now, because the WiFi will be turned off to save power!
     Serial.println("WiFi connected at: " + WiFi.localIP().toString());
   }
-  else Serial.println("WiFi connection *** FAILED ***");
+  else {
+    wifi_signal = 0;
+    Serial.println("WiFi connection *** FAILED ***");
+  }
   return WiFi.status();
 }
 
@@ -159,6 +162,12 @@ void setup() {
         epd_poweroff_all(); // Switch off all power to EPD
       }
     }
+  }
+  else {
+    epd_clear();        // Clear the screen
+    DisplayStatusSection(600, 20, wifi_signal);    // Wi-Fi signal strength and Battery voltage
+    edp_update();       // Update the display to show the information
+    epd_poweroff_all(); // Switch off all power to EPD
   }
   BeginSleep();
 }
@@ -642,9 +651,15 @@ void DrawRSSI(int x, int y, int rssi) {
     if (_rssi <= -60)  WIFIsignal = 18; //  -60dbm to  -41dbm displays 3-bars
     if (_rssi <= -80)  WIFIsignal = 12; //  -80dbm to  -61dbm displays 2-bars
     if (_rssi <= -100) WIFIsignal = 6;  // -100dbm to  -81dbm displays 1-bar
-    fillRect(x + xpos * 8, y - WIFIsignal, 6, WIFIsignal, Black);
+    
+    if (rssi != 0) 
+      fillRect(x + xpos * 8, y - WIFIsignal, 6, WIFIsignal, Black);
+    else // draw empty bars
+      drawRect(x + xpos * 8, y - WIFIsignal, 6, WIFIsignal, Black);
     xpos++;
   }
+  if (rssi == 0) 
+    drawString(x + 28, y - 18, "x", LEFT);
 }
 
 boolean UpdateLocalTime() {
